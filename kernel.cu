@@ -31,11 +31,8 @@ __global__ void horizontal_sgmentation_kernel(unsigned char* input, unsigned cha
 {
 
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	//const int y = blockIdx.y * blockDim.y + threadIdx.y;
 
 	int nx = blockDim.x * gridDim.x;
-	//int ny = blockDim.y * gridDim.y;
-
 
 	for (int row = x; row < height; row += nx){
 		int white_cells = 0;
@@ -64,11 +61,8 @@ __global__ void vertical_sgmentation_kernel(unsigned char* input, unsigned char*
 {
 
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
-	//const int y = blockIdx.y * blockDim.y + threadIdx.y;
 
 	int nx = blockDim.x * gridDim.x;
-	//int ny = blockDim.y * gridDim.y;
-
 
 	for (int col = x; col < width; col += nx){
 		int white_cells = 0;
@@ -112,6 +106,7 @@ int main()
 	GpuMat dst, src;
 	src.upload(img);
 
+	//image preprocessing
 	GpuMat greyMat;
 	gpu::cvtColor(src, greyMat, CV_BGR2GRAY);
 	GpuMat img_hist_equalized;
@@ -122,7 +117,7 @@ int main()
 	gpu::threshold(preProcessMat, preProcessMat, 30, 255, THRESH_BINARY);
 	gpu::bitwise_not(preProcessMat, preProcessMat);
 
-
+	//horizontal dialation
 	Mat horizontalDilate = getStructuringElement(MORPH_RECT, Size(200, 4));
 	GpuMat horizontalDilateMat;
 	gpu::dilate(preProcessMat, horizontalDilateMat, horizontalDilate);
@@ -159,8 +154,8 @@ int main()
 
 	//Copy back data from destination device meory to OpenCV output image
 	SAFE_CALL(cudaMemcpy(output.ptr(), d_output, outputBytes, cudaMemcpyDeviceToHost), "CUDA Memcpy Host To Device Failed");
-	//imshow("Output", output);
 
+	//horizontal segmentation
 	vector<Mat> horizontalSubmats;
 	bool isPreviousWhite = false;
 	bool isCurrentWhite = false;
@@ -168,7 +163,7 @@ int main()
 	int end_row = start_row;
 	int row = 0;
 
-	while ( row < output.rows) {
+	while (row < output.rows) {
 		if (output.at<uchar>(Point(0, row)) == 255){
 			isCurrentWhite = true;
 			end_row = row;
@@ -178,11 +173,12 @@ int main()
 		}
 
 		if (!isCurrentWhite && isPreviousWhite) {
+
 			Mat submat;
 			Mat tmp = preProcessedMat(Rect(0, start_row, preProcessedMat.row(row).cols - 1, end_row - start_row));
 			tmp.copyTo(submat);
 			horizontalSubmats.push_back(submat);
-		//	imshow("Output"+row, submat);
+
 		}
 		isPreviousWhite = isCurrentWhite;
 		isCurrentWhite = false;
@@ -194,6 +190,7 @@ int main()
 	SAFE_CALL(cudaFree(d_output), "CUDA Free Failed");
 
 
+	//vertical stripping
 	vector<Mat> verticalSubmats;
 	for (int i = 0; i < horizontalSubmats.size(); i++) {
 
@@ -238,6 +235,7 @@ int main()
 
 	}
 
+	//character extraction
 	int black_cells = 0;
 	vector<Mat> cellSubmats;
 	for (int i = 0; i < verticalSubmats.size(); i++){
@@ -258,7 +256,7 @@ int main()
 				int spaces = previous_black_cells / 50;
 
 				for (int space = 0; space < spaces; space++){
-				
+
 					Mat spaceCell;
 					Mat tmp = horizontalSubmats[i](Rect(white_cell_end, 0, 50, horizontalSubmats[i].col(0).rows - 1));
 					tmp.copyTo(spaceCell);
@@ -274,13 +272,13 @@ int main()
 						while (verticalSubmats[i].at<uchar>(Point(col, 0)) == 255){
 							col++;
 						}
-					
+
 						col = col - 1;
 						Mat submat;
 						Mat tmp = horizontalSubmats[i](Rect(white_cell_start, 0, col - white_cell_start + 1, horizontalSubmats[i].col(0).rows - 1));
 						tmp.copyTo(submat);
 						cellSubmats.push_back(submat);
-						
+
 					}
 					else{
 						white_cell_start = col;
@@ -293,16 +291,16 @@ int main()
 						while (col < verticalSubmats[i].row(0).cols && verticalSubmats[i].at<uchar>(Point(col, 0)) == 0){
 							col++;
 						}
-					
+
 						if (col - white_single_cell_end > 22 && col < horizontalSubmats[i].row(0).cols){
-							
+
 							Mat submat;
 							Mat tmp = horizontalSubmats[i](Rect(white_cell_start, 0, col - white_single_cell_end, horizontalSubmats[i].col(0).rows - 1));
 							tmp.copyTo(submat);
 							cellSubmats.push_back(submat);
 
 							white_cell_start = col++;
-						
+
 						}
 						else{
 
@@ -315,14 +313,15 @@ int main()
 			}
 			col++;
 		}
-		
+
 	}
 
+	//character mapping
 	vector<Mat> characters;
 	vector<String> paths = { "d", "e", "f", "h", "o", "p", "s", "space" };
 	for (int j = 0; j < 8; j++){
-	
-		Mat character = imread(paths[j]+".JPG", CV_LOAD_IMAGE_ANYCOLOR);
+
+		Mat character = imread(paths[j] + ".JPG", CV_LOAD_IMAGE_ANYCOLOR);
 		characters.push_back(character);
 	}
 
@@ -343,7 +342,6 @@ int main()
 			compare(charMat, cellMat, result, CMP_EQ);
 
 			if (countNonZero(result) >= 2000) {
-
 				cout << characterName << endl;
 				break;
 			}
@@ -351,7 +349,7 @@ int main()
 	}
 
 	int num;
-	cin >>num;
+	cin >> num;
 
 	return 0;
 }
